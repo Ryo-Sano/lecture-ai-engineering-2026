@@ -16,7 +16,7 @@ import inspect
 import json
 from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.exceptions import ModelHTTPError
 from fastmcp import Client
 from pydantic_ai.mcp import MCPToolset, StdioTransport
@@ -42,6 +42,16 @@ agent = Agent(instructions=INSTRUCTIONS)
 agent.tool_plain(tools.search_glossary)
 agent.tool_plain(tools.get_lecture_summary)
 agent.tool_plain(tools.make_quiz)
+
+# 元ファイルからの変更点: 回答後に質問からテーマを作り、承認を経て保存するagentを追加。
+learning_log_agent = Agent(
+    instructions="""\
+質問と回答から学習テーマを1つ作り、回答の要点を1文でまとめて save_learning_log を呼ぶ。
+save_learning_log にはテーマと回答要約だけを渡し、質問文や回答全文は記録しない。
+""",
+    output_type=[str, DeferredToolRequests],
+)
+learning_log_agent.tool_plain(tools.save_learning_log, requires_approval=True)
 
 # 第5回: 使う MCP サーバーの設定ファイル。Claude Desktop や Cursor と同じ "mcpServers" 形式
 MCP_CONFIG = Path(__file__).resolve().parent / "mcp_servers.json"
@@ -77,6 +87,41 @@ def build_mcp_agent(config_path: Path = MCP_CONFIG) -> Agent:
 
 def build_model() -> GoogleModel:
     return GoogleModel(MODEL, provider=GoogleProvider(api_key=get_api_key()))
+
+
+def save_learning_theme(question: str, answer_text: str, model) -> str:
+    """質問と回答から記録内容を作り、利用者の承認後に保存する。"""
+    prompt = f"質問:\n{question}\n\n回答:\n{answer_text}"
+    result = learning_log_agent.run_sync(prompt, model=model)
+    if not isinstance(result.output, DeferredToolRequests) or not result.output.approvals:
+        return str(result.output)
+
+    messages = []
+    for call in result.output.approvals:
+        call_args = call.args
+        if isinstance(call_args, str):
+            try:
+                call_args = json.loads(call_args)
+            except json.JSONDecodeError:
+                call_args = {}
+        theme = call_args.get("theme", "") if isinstance(call_args, dict) else ""
+        summary = call_args.get("summary", "") if isinstance(call_args, dict) else ""
+        if not isinstance(theme, str) or not theme.strip() or not isinstance(summary, str) or not summary.strip():
+            print("テーマまたは回答要約を取得できないため、保存を拒否します。")
+            messages.append("テーマまたは回答要約が空のため、記録しませんでした。")
+            continue
+
+        theme = " ".join(theme.split())
+        summary = " ".join(summary.split())
+        answer = input(
+            f"この学習記録を保存しますか？\nテーマ: {theme}\n回答要約: {summary}\n[y/N] "
+        )
+        if answer.strip().lower() == "y":
+            # 元ファイルからの変更点: 承認後はテーマと要約を直接保存し、追加のLLM応答生成を省く。
+            messages.append(tools.save_learning_log(theme, summary))
+        else:
+            messages.append("学習テーマの記録をキャンセルしました。")
+    return "\n".join(messages)
 
 
 def print_tools(target: Agent) -> None:
@@ -126,14 +171,18 @@ def main() -> None:
     print(f"[model] {MODEL}")
     if args.mcp:
         print("[tools] MCP サーバー（app/mcp_servers.json）")
+    model = build_model()
     try:
-        result = target.run_sync(args.question, model=build_model())
+        result = target.run_sync(args.question, model=model)
+        # 元ファイルからの変更点: 回答を表示してからテーマ保存の承認フローを実行する。
+        print(result.output)
+        if args.trace:
+            print_trace(result)
+        if not args.mcp:
+            print(save_learning_theme(args.question, str(result.output), model))
     except ModelHTTPError as e:
         print(api_error_message(e.status_code, str(e.body)[:200]))
         raise SystemExit(1)
-    print(result.output)
-    if args.trace:
-        print_trace(result)
 
 
 if __name__ == "__main__":
