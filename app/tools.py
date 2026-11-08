@@ -10,6 +10,8 @@ from functools import cache
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# 元ファイルからの変更点: 学習テーマの保存先を追加。
+LEARNING_LOG_DIR = Path(__file__).resolve().parent.parent / "learning_log"
 MAX_RESULTS = 3
 
 
@@ -98,3 +100,18 @@ def make_quiz(lecture: int) -> str:
         },
         ensure_ascii=False,
     )
+
+
+# 元ファイルからの変更点: 承認後にテーマと回答要約を1行追記するツールを追加。
+def save_learning_log(theme: str, summary: str) -> str:
+    """学習テーマと回答の1文要約を learning_log/ に1行で追記する。"""
+    normalized_theme = " ".join(theme.split())
+    normalized_summary = " ".join(summary.split())
+    if not normalized_theme or not normalized_summary:
+        return "テーマまたは回答要約が空のため、記録しませんでした。"
+
+    LEARNING_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LEARNING_LOG_DIR / "themes.txt"
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(f"{normalized_theme}: {normalized_summary}\n")
+    return f"学習テーマ「{normalized_theme}」と回答要約を記録しました。"
