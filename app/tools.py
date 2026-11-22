@@ -5,12 +5,15 @@
 """
 
 import json
+import random
 from functools import cache
 from pathlib import Path
 
 from app.config import api_error_message
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+# 元ファイルからの変更点: 学習テーマの保存先を追加。
+LEARNING_LOG_DIR = Path(__file__).resolve().parent.parent / "learning_log"
 MAX_RESULTS = 3
 
 
@@ -126,3 +129,36 @@ def search_graph(query: str) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
     except APIError as e:
         return json.dumps({"error": api_error_message(e.code)}, ensure_ascii=False)
+
+def make_quiz(lecture: int) -> str:
+    """指定した回の用語から1つを選び、確認問題と答えを返す。
+
+    「第2回の確認問題を出して」のように、復習用の問題を求められたときに使う。
+    """
+    terms = [entry for entry in load_glossary() if entry["lecture"] == lecture]
+    if not terms:
+        return f"第{lecture}回の用語が見つかりません。"
+
+    entry = random.choice(terms)
+    return json.dumps(
+        {
+            "question": f"「{entry['term']}」の意味は？",
+            "answer": entry["definition"],
+        },
+        ensure_ascii=False,
+    )
+
+
+# 元ファイルからの変更点: 承認後にテーマと回答要約を1行追記するツールを追加。
+def save_learning_log(theme: str, summary: str) -> str:
+    """学習テーマと回答の1文要約を learning_log/ に1行で追記する。"""
+    normalized_theme = " ".join(theme.split())
+    normalized_summary = " ".join(summary.split())
+    if not normalized_theme or not normalized_summary:
+        return "テーマまたは回答要約が空のため、記録しませんでした。"
+
+    LEARNING_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LEARNING_LOG_DIR / "themes.txt"
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(f"{normalized_theme}: {normalized_summary}\n")
+    return f"学習テーマ「{normalized_theme}」と回答要約を記録しました。"

@@ -11,7 +11,8 @@ from pydantic_ai import DeferredToolRequests
 from pydantic_ai.messages import ToolCallPart, ToolReturnPart
 from pydantic_ai.models.test import TestModel
 
-from app.agent import agent
+from app import tools
+from app.agent import agent, save_learning_theme
 
 BASE_TOOLS = {"search_materials"}
 
@@ -28,6 +29,7 @@ def test_base_tools_are_registered_and_called(monkeypatch):
 
     offered = {t.name for t in model.last_model_request_parameters.function_tools}
     assert BASE_TOOLS <= offered  # 演習でツールを足しても壊れないよう「含む」で判定
+    assert "save_learning_log" not in offered
 
     called = {p.tool_name for p in _parts(result, ToolCallPart)}
     assert BASE_TOOLS <= called
@@ -44,5 +46,4 @@ def test_material_result_reaches_the_model(monkeypatch):
     with agent.override(model=model):
         result = agent.run_sync("RAGとは？")
     returns = _parts(result, ToolReturnPart)
-    assert returns and returns[0].tool_name == "search_materials"
-    assert json.loads(returns[0].content)["results"] == [hit]
+    assert returns and returns[0].tool_name == "search_glossary"

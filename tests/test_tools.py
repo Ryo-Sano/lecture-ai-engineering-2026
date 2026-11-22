@@ -39,6 +39,59 @@ def test_lecture_summary():
     assert "まだありません" in tools.get_lecture_summary(99)
 
 
+def test_make_quiz_returns_question_and_answer(monkeypatch):
+    terms = [
+        {"lecture": 2, "term": "PEFT", "definition": "効率的な微調整手法。"},
+        {"lecture": 3, "term": "tool", "definition": "エージェントが使う機能。"},
+    ]
+    monkeypatch.setattr(tools, "load_glossary", lambda: terms)
+    monkeypatch.setattr(tools.random, "choice", lambda options: options[0])
+
+    quiz = json.loads(tools.make_quiz(2))
+
+    assert quiz == {
+        "question": "「PEFT」の意味は？",
+        "answer": "効率的な微調整手法。",
+    }
+
+
+def test_make_quiz_reports_missing_lecture(monkeypatch):
+    monkeypatch.setattr(tools, "load_glossary", lambda: [])
+
+    assert "第99回の用語が見つかりません" in tools.make_quiz(99)
+
+
+def test_save_learning_log_appends_theme_and_summary(monkeypatch, tmp_path):
+    log_dir = tmp_path / "learning_log"
+    monkeypatch.setattr(tools, "LEARNING_LOG_DIR", log_dir)
+
+    result = tools.save_learning_log(
+        "  Pydantic AI\n 承認付きツール  ",
+        "  承認が必要なツールは\n 実行前に利用者の確認を待つ。  ",
+    )
+
+    assert result == "学習テーマ「Pydantic AI 承認付きツール」と回答要約を記録しました。"
+    assert (log_dir / "themes.txt").read_text(encoding="utf-8") == (
+        "Pydantic AI 承認付きツール: 承認が必要なツールは 実行前に利用者の確認を待つ。\n"
+    )
+
+
+def test_save_learning_log_ignores_empty_theme(monkeypatch, tmp_path):
+    log_dir = tmp_path / "learning_log"
+    monkeypatch.setattr(tools, "LEARNING_LOG_DIR", log_dir)
+
+    assert "テーマまたは回答要約が空" in tools.save_learning_log(" \n ", "要約")
+    assert not log_dir.exists()
+
+
+def test_save_learning_log_ignores_empty_summary(monkeypatch, tmp_path):
+    log_dir = tmp_path / "learning_log"
+    monkeypatch.setattr(tools, "LEARNING_LOG_DIR", log_dir)
+
+    assert "テーマまたは回答要約が空" in tools.save_learning_log("LoRA", " \n ")
+    assert not log_dir.exists()
+
+
 def test_default_question_of_lecture1_is_answerable_from_glossary():
     """第1回の既定の質問（app.ask）は、第3回のエージェントが用語集で正しく答えられること。"""
     from app.ask import DEFAULT_QUESTION
